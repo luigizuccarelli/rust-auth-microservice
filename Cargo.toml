@@ -1,0 +1,30 @@
+[package]
+name = "rust-auth-microservice"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.88"
+clap = { version = "4.5.41", features = ["derive"] }
+http = "1.3.1"
+http-body-util = "0.1.3"
+hyper = "1.6.0"
+hyper-util = { version = "0.1.15", default-features = false, features = ["client-legacy","tokio", "server-auto" ] }  
+jsonwebtoken = "9.3.1"
+rustls = "0.23.29"
+rustls-pemfile = "2.2.0"
+rustls-pki-types = "1.12.0"
+serde = "1.0.219"
+serde_derive = "1.0.219"
+serde_json = "1.0.140"
+tokio = { version = "1.46.1", features = ["full"] }
+tokio-rustls = "0.26.2"
+url = "2.5.4"
+custom-logger = { git = "https://github.com/lmzuccarelli/rust-custom-logger", branch = "main", version = "0.2.0" }
+
+
+[profile.release]
+strip = true # Strip symbols from the binary
+opt-level = "s" # Optimize for size
+lto = true # Enable link-time optimization
+codegen-units = 1 # Mazimize size reduction optimization
