@@ -4,5 +4,6 @@
 	"port": "8085",
 	"log_level": "info",
 	"certs_dir": "./certs/",
-	"cert_mode": "file"
+	"cert_mode": "file",
+	"user_api_url": "https://192.168.1.29/user"
 }

@@ -8,8 +8,10 @@ use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use rustls::ServerConfig;
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
@@ -17,6 +19,9 @@ mod certs;
 mod cli;
 mod config;
 mod handlers;
+
+// used for lookup in read mode only
+static MAP_LOOKUP: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 fn main() {
     // Serve an jwt auth service over HTTPS, with proper error handling.
@@ -36,10 +41,19 @@ fn main() {
         &_ => log::LevelFilter::Info,
     };
 
+    // set up for (read) reference in auth handler
+    let mut hm = HashMap::new();
+    hm.insert(
+        "user_api_url".to_owned(),
+        params.as_ref().unwrap().user_api_url.to_owned(),
+    );
+    *MAP_LOOKUP.lock().unwrap() = Some(hm.clone());
+
     log::Logging::new()
         .with_level(level)
         .init()
         .expect("should initialize");
+
     if let Err(e) = run_server(params.unwrap()) {
         eprintln!("error: {}", e);
         std::process::exit(1);

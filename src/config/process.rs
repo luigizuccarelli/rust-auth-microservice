@@ -9,6 +9,7 @@ pub struct Parameters {
     pub log_level: String,
     pub certs_dir: Option<String>,
     pub cert_mode: String,
+    pub user_api_url: String,
 }
 
 pub trait ConfigInterface {

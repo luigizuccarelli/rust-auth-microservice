@@ -1,13 +1,18 @@
 use custom_logger as log;
 use http::{Method, Request, Response, StatusCode};
-use http_body_util::Full;
+use http_body_util::{Empty, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::header::AUTHORIZATION;
+use hyper_tls::HttpsConnector;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::time::{Duration, UNIX_EPOCH};
 use url::Url;
+
+use crate::MAP_LOOKUP;
 
 #[derive(Deserialize, Serialize, Debug)]
 struct Claims {
@@ -39,8 +44,7 @@ impl AuthBody {
     }
 }
 
-// custom JWT auth service, handling two different routes and a
-// catch-all 404 responder.
+// custom JWT auth service, handling two different routes
 pub async fn auth_token_service(
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
@@ -57,7 +61,6 @@ pub async fn auth_token_service(
                     message: "request parameters : user and session-id are missing or incorrrect"
                         .to_string(),
                 };
-
                 *response.status_mut() = StatusCode::BAD_REQUEST;
                 *response.body_mut() =
                     Full::from(serde_json::to_string(&validate_response).unwrap());
@@ -66,6 +69,21 @@ pub async fn auth_token_service(
                 let session_id = params_hm.get("session-id").unwrap();
                 // do db lookup
                 log::debug!("{user} {session_id}");
+                // set up hypertls
+                let https = HttpsConnector::new();
+                let client = Client::builder(TokioExecutor::new()).build::<_, Empty<Bytes>>(https);
+                let hm = MAP_LOOKUP.lock().unwrap().clone();
+                let client_response = client
+                    .get(
+                        format!("{}/user={}", hm.unwrap().get("user_api_url").unwrap(), user)
+                            .parse()
+                            .unwrap(),
+                    )
+                    .await;
+                let res = client_response.unwrap();
+                let user_data = res.body();
+                log::debug!("result user api call {:?}", user_data);
+
                 // do a lookup on the db for user and sessionid
                 let time_exp = std::time::SystemTime::now()
                     .checked_add(Duration::from_secs(3600))
@@ -102,6 +120,7 @@ pub async fn auth_token_service(
                         jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
                     validation.set_audience(&vec!["samcopai"]);
                     validation.set_issuer(&vec!["https://samcopai.com"]);
+                    validation.set_required_spec_claims(&["iss,aud,exp,sub"]);
                     let jwt_secret = match env::var("JWT_SECRET") {
                         Ok(var) => var,
                         Err(_) => "secret".to_string(),
@@ -138,7 +157,6 @@ pub async fn auth_token_service(
                 }
             }
         }
-        // catch-all 404.
         _ => {
             *response.status_mut() = StatusCode::NOT_FOUND;
         }
