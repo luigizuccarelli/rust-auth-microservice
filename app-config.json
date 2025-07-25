@@ -2,7 +2,7 @@
 	"name": "auth-microservice",
 	"description": "a simple jwt microservice for auth",
 	"port": "8085",
-	"log_level": "info",
+	"log_level": "debug",
 	"certs_dir": "./certs/",
 	"cert_mode": "file",
 	"user_api_url": "https://192.168.1.29/user"

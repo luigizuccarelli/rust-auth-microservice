@@ -51,7 +51,7 @@ pub async fn auth_token_service(
     let mut response = Response::new(Full::default());
     match (req.method(), req.uri().path()) {
         // get a JWT token route.
-        (&Method::POST, "/token") => {
+        (&Method::GET, "/token") => {
             let uri_string = req.uri().to_string();
             let request_url = Url::parse(&uri_string).unwrap();
             let params_hm: HashMap<_, _> = request_url.query_pairs().into_owned().collect();
@@ -67,49 +67,79 @@ pub async fn auth_token_service(
             } else {
                 let user = params_hm.get("user").unwrap();
                 let session_id = params_hm.get("session-id").unwrap();
-                // do db lookup
                 log::debug!("{user} {session_id}");
-                // set up hypertls
-                let https = HttpsConnector::new();
-                let client = Client::builder(TokioExecutor::new()).build::<_, Empty<Bytes>>(https);
-                let hm = MAP_LOOKUP.lock().unwrap().clone();
-                let client_response = client
-                    .get(
-                        format!("{}/user={}", hm.unwrap().get("user_api_url").unwrap(), user)
-                            .parse()
-                            .unwrap(),
-                    )
-                    .await;
-                let res = client_response.unwrap();
-                let user_data = res.body();
-                log::debug!("result user api call {:?}", user_data);
-
-                // do a lookup on the db for user and sessionid
-                let time_exp = std::time::SystemTime::now()
-                    .checked_add(Duration::from_secs(3600))
-                    .unwrap()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-
-                let c = Claims {
-                    custom_claim: "user".to_owned(),
-                    iss: "https://samcopai.com".to_owned(),
-                    sub: "system auth claim".to_owned(),
-                    exp: time_exp,
-                    aud: "samcopai".to_owned(),
+                let bypass = match env::var("BYPASS_USER_CREDS") {
+                    Ok(_) => true,
+                    Err(_) => {
+                        // set up hypertls
+                        // do db lookup
+                        let https = HttpsConnector::new();
+                        let client =
+                            Client::builder(TokioExecutor::new()).build::<_, Empty<Bytes>>(https);
+                        let hm = MAP_LOOKUP.lock().unwrap().clone();
+                        let client_response = client
+                            .get(
+                                format!(
+                                    "{}?user={}&session-id={}",
+                                    hm.unwrap().get("user_api_url").unwrap(),
+                                    user,
+                                    session_id
+                                )
+                                .parse()
+                                .unwrap(),
+                            )
+                            .await;
+                        match client_response {
+                            Ok(res) => {
+                                if res.status() == StatusCode::OK {
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            Err(_) => false,
+                        }
+                    }
                 };
+                match bypass {
+                    true => {
+                        let time_exp = std::time::SystemTime::now()
+                            .checked_add(Duration::from_secs(3600))
+                            .unwrap()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
 
-                let header = jsonwebtoken::Header::default();
-                let jwt_secret = match env::var("JWT_SECRET") {
-                    Ok(var) => var,
-                    Err(_) => "secret".to_string(),
-                };
-                let secret = jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes());
-                let token = jsonwebtoken::encode(&header, &c, &secret).unwrap();
-                let auth_body = AuthBody::new(token);
-                *response.body_mut() = Full::from(serde_json::to_string(&auth_body).unwrap());
-            }
+                        let c = Claims {
+                            custom_claim: "user".to_owned(),
+                            iss: "https://samcopai.com".to_owned(),
+                            sub: "system auth claim".to_owned(),
+                            exp: time_exp,
+                            aud: "samcopai".to_owned(),
+                        };
+
+                        let header = jsonwebtoken::Header::default();
+                        let jwt_secret = match env::var("JWT_SECRET") {
+                            Ok(var) => var,
+                            Err(_) => "secret".to_string(),
+                        };
+                        let secret = jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes());
+                        let token = jsonwebtoken::encode(&header, &c, &secret).unwrap();
+                        let auth_body = AuthBody::new(token);
+                        *response.body_mut() =
+                            Full::from(serde_json::to_string(&auth_body).unwrap());
+                    }
+                    false => {
+                        let validate_response = AuthResponse {
+                            status: "unauthorized".to_string(),
+                            message: "error: user credentials invalid".to_string(),
+                        };
+                        *response.status_mut() = StatusCode::FORBIDDEN;
+                        *response.body_mut() =
+                            Full::from(serde_json::to_string(&validate_response).unwrap());
+                    }
+                }
+            };
         }
         // validate a JWT token route.
         (&Method::POST, "/validate") => {
